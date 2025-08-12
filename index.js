@@ -99,7 +99,7 @@ const BLOXORA_COMMANDS = [
       },
       {
         name: 'rank',
-        description: 'The rank number to set',
+        description: 'The new rank number (1-255)',
         type: 4, // INTEGER
         required: true,
         min_value: 1,
@@ -109,7 +109,7 @@ const BLOXORA_COMMANDS = [
   },
   {
     name: 'promote',
-    description: 'Promote a user by one rank',
+    description: 'Promote a user by one rank in the active Roblox group',
     options: [
       {
         name: 'user',
@@ -121,7 +121,7 @@ const BLOXORA_COMMANDS = [
   },
   {
     name: 'demote',
-    description: 'Demote a user by one rank',
+    description: 'Demote a user by one rank in the active Roblox group',
     options: [
       {
         name: 'user',
@@ -133,51 +133,49 @@ const BLOXORA_COMMANDS = [
   },
   {
     name: 'rank-info',
-    description: 'Get information about a user\'s current rank',
+    description: 'Get rank information for a user in the active Roblox group',
     options: [
       {
         name: 'user',
-        description: 'The user to check (optional, defaults to yourself)',
+        description: 'The user to check (optional - defaults to you)',
         type: 6, // USER
         required: false
       }
     ]
   },
   {
+    name: 'sync',
+    description: 'Sync your Discord roles with your Roblox group rank'
+  },
+  {
     name: 'group',
-    description: 'Show information about the connected Roblox group',
-    options: []
+    description: 'Display information about the connected Roblox group'
   },
   {
     name: 'unlink',
-    description: 'Disconnect the Roblox group from this Discord server',
-    options: []
+    description: 'Disconnect the Roblox group from this Discord server (Owner only)'
   },
   {
     name: 'help',
-    description: 'Show help information for Bloxora Discord bot commands',
-    options: []
+    description: 'Show help information about Bloxora Discord bot commands'
   }
 ];
 
-// 🔧 Helper Functions
+// 🔥 Firebase Helper Functions
 async function getAdminSettings() {
   try {
     const doc = await db.collection('adminSettings').doc('global').get();
-    if (!doc.exists) {
-      console.log('📄 No admin settings found, using defaults');
-      return { discordBot: { enabled: true } };
-    }
-    return doc.data();
+    return doc.exists ? doc.data() : null;
   } catch (error) {
     console.error('❌ Error fetching admin settings:', error);
-    return { discordBot: { enabled: true } };
+    return null;
   }
 }
 
+// 🎯 Register Discord Commands Globally
 async function registerGlobalCommands() {
   try {
-    console.log('🔄 Registering global slash commands...');
+    console.log('📝 Registering global Discord commands...');
     
     const response = await fetch(`https://discord.com/api/v10/applications/${process.env.DISCORD_APPLICATION_ID}/commands`, {
       method: 'PUT',
@@ -189,13 +187,13 @@ async function registerGlobalCommands() {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ Discord API Error:', errorText);
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
+      const error = await response.text();
+      throw new Error(`Failed to register commands: ${response.status} ${error}`);
     }
 
     const commands = await response.json();
     botStats.commandsRegistered = commands.length;
+    
     console.log(`✅ Successfully registered ${commands.length} global commands:`);
     commands.forEach(cmd => console.log(`   • /${cmd.name} - ${cmd.description}`));
     
@@ -220,8 +218,57 @@ async function updateBotPresence() {
       type: ActivityType.Watching
     };
 
-    // Check for custom status
-    if (settings.discordBot.customStatus?.enabled && settings.discordBot.customStatus?.text) {
+    // Check for custom status from primary workspace (Super Admin's workspace)
+    // Priority: 1) Super Admin workspace custom status, 2) Admin settings custom status, 3) Default
+    try {
+      // Find Super Admin user (naiym222@gmail.com)
+      const superAdminQuery = await db.collection('users')
+        .where('email', '==', 'naiym222@gmail.com')
+        .limit(1)
+        .get();
+
+      if (!superAdminQuery.empty) {
+        const superAdminUser = superAdminQuery.docs[0];
+        const superAdminId = superAdminUser.id;
+
+        // Get Super Admin's workspace with custom status
+        const workspacesQuery = await db.collection('workspaces')
+          .where('owner', '==', superAdminId)
+          .limit(1)
+          .get();
+
+        if (!workspacesQuery.empty) {
+          const workspace = workspacesQuery.docs[0].data();
+          const customStatus = workspace.settings?.discordBot?.customStatus;
+
+          if (customStatus?.enabled && customStatus?.text) {
+            const typeMap = {
+              'PLAYING': ActivityType.Playing,
+              'STREAMING': ActivityType.Streaming,
+              'LISTENING': ActivityType.Listening,
+              'WATCHING': ActivityType.Watching,
+              'COMPETING': ActivityType.Competing
+            };
+
+            activity = {
+              name: customStatus.text,
+              type: typeMap[customStatus.type] || ActivityType.Watching
+            };
+
+            if (customStatus.type === 'STREAMING' && customStatus.url) {
+              activity.url = customStatus.url;
+            }
+
+            console.log(`🎨 Using custom status from Super Admin workspace: ${activity.name}`);
+          }
+        }
+      }
+    } catch (error) {
+      console.log('⚠️ Could not load workspace custom status, using default:', error.message);
+    }
+
+    // Fallback: Check admin settings for custom status (legacy support)
+    if (activity.name === 'Bloxora Workspaces' && settings.discordBot.customStatus?.enabled && settings.discordBot.customStatus?.text) {
       const typeMap = {
         'PLAYING': ActivityType.Playing,
         'STREAMING': ActivityType.Streaming,
@@ -238,6 +285,8 @@ async function updateBotPresence() {
       if (settings.discordBot.customStatus.type === 'STREAMING' && settings.discordBot.customStatus.url) {
         activity.url = settings.discordBot.customStatus.url;
       }
+      
+      console.log(`🎨 Using custom status from admin settings: ${activity.name}`);
     }
 
     await client.user.setPresence({
@@ -297,47 +346,39 @@ async function checkServerWhitelist(guild) {
 // 🎪 Discord Events
 client.once('ready', async () => {
   console.log(`🚀 Bloxora Discord Bot is ONLINE as ${client.user.tag}`);
-  console.log(`📊 Connected to ${client.guilds.cache.size} servers`);
-  console.log(`🌐 Webhook endpoint: https://bloxora.com/api/discord/interactions`);
+  console.log(`📊 Serving ${client.guilds.cache.size} Discord servers`);
   
+  // Register commands and update presence
   try {
-    // Register global commands
     await registerGlobalCommands();
-    
-    // Set initial presence
     await updateBotPresence();
     
-    console.log('✅ Bot fully initialized and ready!');
-    console.log('🔄 Status updates every 30 seconds...');
-    
-    // Start periodic status updates (every 30 seconds)
-    setInterval(updateBotPresence, 30000);
+    // Update presence every 30 minutes
+    setInterval(updateBotPresence, 30 * 60 * 1000);
     
   } catch (error) {
-    console.error('❌ Bot initialization error:', error);
+    console.error('❌ Startup error:', error);
   }
 });
 
 client.on('guildCreate', async (guild) => {
-  console.log(`🎉 Joined server: ${guild.name} (${guild.id}) - ${guild.memberCount} members`);
+  console.log(`➕ Joined new server: ${guild.name} (${guild.id})`);
   botStats.serversJoined++;
   
-  // Check if we should stay in this server
-  const shouldStay = await checkServerWhitelist(guild);
-  
-  if (!shouldStay) {
-    console.log(`🚪 Leaving unauthorized server: ${guild.name}`);
+  // Check if server is authorized
+  const isAuthorized = await checkServerWhitelist(guild);
+  if (!isAuthorized) {
+    console.log(`🚫 Leaving unauthorized server: ${guild.name}`);
     try {
       await guild.leave();
-      console.log(`👋 Successfully left ${guild.name}`);
     } catch (error) {
-      console.error('❌ Failed to leave server:', error);
+      console.error('❌ Error leaving server:', error);
     }
   }
 });
 
 client.on('guildDelete', (guild) => {
-  console.log(`👋 Left server: ${guild.name} (${guild.id})`);
+  console.log(`➖ Left server: ${guild.name} (${guild.id})`);
 });
 
 client.on('error', (error) => {
@@ -348,71 +389,46 @@ client.on('warn', (warning) => {
   console.warn('⚠️ Discord client warning:', warning);
 });
 
-// 🌐 Health Check Server (Required for Railway)
+// 🩺 Health Check Endpoint for Railway
 const server = createServer((req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Content-Type', 'application/json');
-  
-  if (req.url === '/health' || req.url === '/') {
-    const uptime = client.uptime ? Math.floor(client.uptime / 1000) : 0;
-    const uptimeHours = Math.floor(uptime / 3600);
-    const uptimeMinutes = Math.floor((uptime % 3600) / 60);
-    
-    res.writeHead(200);
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       status: 'healthy',
-      service: 'Bloxora Discord Bot',
-      bot: {
-        ready: client.readyAt ? true : false,
-        user: client.user ? client.user.tag : null,
-        id: client.user ? client.user.id : null,
-        servers: client.guilds.cache.size,
-        uptime: uptime > 0 ? `${uptimeHours}h ${uptimeMinutes}m` : 'Starting...'
-      },
-      stats: botStats,
-      webhookEndpoint: 'https://bloxora.com/api/discord/interactions',
-      timestamp: new Date().toISOString()
-    }, null, 2));
+      uptime: Math.floor((Date.now() - botStats.startTime.getTime()) / 1000),
+      servers: client.guilds.cache.size,
+      commandsRegistered: botStats.commandsRegistered,
+      lastStatusUpdate: botStats.lastStatusUpdate,
+      presenceUpdates: botStats.presenceUpdates
+    }));
   } else {
     res.writeHead(404);
-    res.end(JSON.stringify({ error: 'Not found' }));
+    res.end('Not Found');
   }
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🌐 Health server running on port ${PORT}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/health`);
+  console.log(`🩺 Health check server running on port ${PORT}`);
 });
 
-// 🔑 Login to Discord
-console.log('🔐 Logging into Discord...');
+// 🚀 Start Discord Bot
 client.login(process.env.DISCORD_BOT_TOKEN).catch(error => {
   console.error('❌ Failed to login to Discord:', error);
-  console.error('🔍 Check your DISCORD_BOT_TOKEN environment variable');
   process.exit(1);
 });
 
-// 🛡️ Graceful shutdown
+// 🛑 Graceful Shutdown
 process.on('SIGINT', () => {
-  console.log('👋 Shutting down gracefully...');
+  console.log('🛑 Received SIGINT, shutting down gracefully...');
   client.destroy();
   server.close();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  console.log('👋 Received SIGTERM, shutting down...');
+  console.log('🛑 Received SIGTERM, shutting down gracefully...');
   client.destroy();
   server.close();
   process.exit(0);
-});
-
-// Handle uncaught errors
-process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught Exception:', error);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
 });
