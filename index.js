@@ -147,6 +147,16 @@ const BLOXORA_COMMANDS = [
     name: 'group',
     description: 'Show information about the connected Roblox group',
     options: []
+  },
+  {
+    name: 'unlink',
+    description: 'Disconnect the Roblox group from this Discord server',
+    options: []
+  },
+  {
+    name: 'help',
+    description: 'Show help information for Bloxora Discord bot commands',
+    options: []
   }
 ];
 
