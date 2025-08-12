@@ -132,7 +132,7 @@ const BLOXORA_COMMANDS = [
     ]
   },
   {
-    name: 'rank-info',
+    name: 'rankinfo',
     description: 'Get rank information for a user in the active Roblox group',
     options: [
       {
@@ -164,7 +164,7 @@ const BLOXORA_COMMANDS = [
 // 🔥 Firebase Helper Functions
 async function getAdminSettings() {
   try {
-    const doc = await db.collection('admin').doc('settings').get();
+    const doc = await db.collection('adminSettings').doc('global').get();
     return doc.exists ? doc.data() : null;
   } catch (error) {
     console.error('❌ Error fetching admin settings:', error);
