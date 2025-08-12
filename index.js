@@ -142,6 +142,11 @@ const BLOXORA_COMMANDS = [
         required: false
       }
     ]
+  },
+  {
+    name: 'group',
+    description: 'Show information about the connected Roblox group',
+    options: []
   }
 ];
 
