@@ -92,9 +92,9 @@ const BLOXORA_COMMANDS = [
     description: 'Set a user\'s rank in the active Roblox group',
     options: [
       {
-        name: 'user',
-        description: 'The user to rank',
-        type: 6, // USER
+        name: 'roblox_user',
+        description: 'The Roblox username to rank',
+        type: 3, // STRING
         required: true
       },
       {
@@ -112,9 +112,9 @@ const BLOXORA_COMMANDS = [
     description: 'Promote a user by one rank in the active Roblox group',
     options: [
       {
-        name: 'user',
-        description: 'The user to promote',
-        type: 6, // USER
+        name: 'roblox_user',
+        description: 'The Roblox username to promote',
+        type: 3, // STRING
         required: true
       }
     ]
@@ -124,9 +124,9 @@ const BLOXORA_COMMANDS = [
     description: 'Demote a user by one rank in the active Roblox group',
     options: [
       {
-        name: 'user',
-        description: 'The user to demote',
-        type: 6, // USER
+        name: 'roblox_user',
+        description: 'The Roblox username to demote',
+        type: 3, // STRING
         required: true
       }
     ]
